@@ -1,0 +1,7 @@
+*.py[cdo]
+.env
+.tox
+coverage
+dist
+doc/_build
+src/clik_wtforms.egg-info
