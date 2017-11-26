@@ -7,33 +7,140 @@ Clik extension that integrates with WTForms.
 :license: BSD
 """
 import argparse
+import datetime
 import decimal
+import functools
 
 from clik import args as clik_args, parser as clik_parser
-from clik.app import AttributeDict
-from wtforms import BooleanField, DecimalField, FloatField, Form as BaseForm, \
-    IntegerField, StringField
+from clik.compat import iteritems
+from wtforms import Form as BaseForm
 
-# + Boolean
-# - Date
-# - DateTime
-# + Decimal
-# - File
-# - MultipleFile
-# + Float
-# + Integer
-# x Radio -- same thing as Select
-# - Select
-# - SelectMultiple
-# - Submit
-# + String
-# - Hidden
-# - Password
-# - TextArea
-# - FormField
-# - FieldList
+
+# attribute name -> argument name (_ -> -)
+# label -> metavar
+# description -> help text
+# default -> default
+
+# short_arguments = dict(f=foo)
+# get_short_arguments() -> dict(f=foo)
+
+# <field>_argument_kwargs() -> dict()
+# configure_<field>_argument(???) -> None or args.name
+
 
 mappers = {}
+
+
+def mapper(type):
+    def decorate(fn):
+        mappers[type] = fn
+        return fn
+    return decorate
+
+
+def basic_mapper(type, exclude_keys=None):
+    if exclude_keys is None:
+        exclude_keys = ()
+
+    def decorator(fn):
+        @mapper(type)
+        @functools.wraps(fn)
+        def decorate(form, field):
+            rv = basic_kwargs(field, exclude_keys)
+            extra = fn(form, field)
+            if extra:
+                rv.update(extra)
+            return rv
+        return decorate
+    return decorator
+
+
+def basic_kwargs(field, exclude_keys=None):
+    rv = {}
+    if exclude_keys is None:
+        exclude_keys = ()
+
+    if 'help' not in exclude_keys and field.description:
+        rv['help'] = field.description
+
+    if 'default' not in exclude_keys and field.default is not None:
+        rv['default'] = field.default
+        if 'help_default' not in exclude_keys and 'help' in rv:
+            if len(str(field.default).split()) > 1:
+                fmt = '"%(default)s"'
+            else:
+                fmt = '%(default)s'
+            rv['help'] += ' (default: %s)' % fmt
+
+    default_text = field.name.replace('_', ' ').title()
+    if 'metavar' not in exclude_keys and field.label.text != default_text:
+        rv['metavar'] = field.label.text
+
+    return rv
+
+
+def decimal_type(value):
+    try:
+        return decimal.Decimal(value)
+    except decimal.DecimalException:
+        raise argparse.ArgumentTypeError("invalid decimal value: '%s'" % value)
+
+
+def make_datetime_type(field):
+    def datetime_type(value):
+        try:
+            dt = datetime.strptime(value, field.format)
+        except ValueError as e:
+            fmt = "invalid date/time value: '%s' (%s)"
+            raise argparse.ArgumentTypeError(fmt % (value, e))
+        if isinstance(field, DateTimeField):
+            return dt
+        if isinstance(field, DateField):
+            return dt.date()
+        if isinstance(field, TimeField):
+            return dt.time()
+        raise Exception('unreachable')
+    return datetime_type
+
+
+@basic_mapper(BooleanField, exclude_keys=['metavar'])
+def boolean_kwargs(_, field):
+    return dict(action='store_false' if field.default else 'store_true')
+
+
+@basic_mapper(DateField)
+def date_kwargs(_, field):
+    return dict(type=make_datetime_type(field))
+
+
+@basic_mapper(DateTimeField)
+def datetime_kwargs(_, field):
+    return dict(type=make_datetime_type(field))
+
+
+@basic_mapper(DecimalField)
+def decimal_kwargs(*_):
+    return dict(type=decimal_type)
+
+
+@basic_mapper(FloatField)
+def float_kwargs(*_):
+    return dict(type=float)
+
+
+@basic_mapper(IntegerField)
+def integer_kwargs(*_):
+    return dict(type=int)
+
+
+@basic_mapper(StringField)
+def string_kwargs(*_):
+    pass
+
+
+@basic_mapper(TimeField)
+def time_kwargs(_, field):
+    return dict(type=make_datetime_type(field))
 
 
 class UnsupportedFieldType(Exception):
@@ -47,140 +154,51 @@ class UnsupportedFieldType(Exception):
         self.field = field
 
 
-def decimal_type(value):
-    try:
-        return decimal.Decimal(value)
-    except decimal.DecimalException:
-        raise argparse.ArgumentTypeError("invalid decimal value: '%s'" % value)
-
-
-def mapper(*types):
-    def decorate(fn):
-        for type in types:
-            mappers[type] = fn
-        return fn
-    return decorate
-
-
-def basic_kwargs(field, **extra_kwargs):
-    rv = {}
-    if field.description:
-        rv['help'] = field.description
-    if field.default is not None:
-        rv['default'] = field.default
-        if 'help' in rv:
-            if len(str(field.default).split()) > 1:
-                fmt = '"%(default)s"'
-            else:
-                fmt = '%(default)s'
-            rv['help'] += ' (default: %s)' % fmt
-
-    # This is a dumb hack to check whether the user explicitly
-    # defined a label. If so, we want to use it as the metavar. If
-    # not, we want to punt the metavar to argparse (by passing
-    # nothing).
-    #
-    # As far as I can tell, there is no good way in WTForms to check
-    # whether the label was defined in the form. In the Field
-    # constructor, when label is unset, WTForms assigns it to a
-    # default value (the value computed below). So we check for that
-    # value, and if it matches, we ignore the label.
-    #
-    # I think the only end user failure case would be someone
-    # explicitly setting the label to the default value and expecting
-    # it to be the metavar. I'm ok with failing there.
-    #
-    # The other gotcha would be if WTForms changes how it computes the
-    # default value. In that case, this check fails disastrously. That
-    # should be fairly obvious, though, and a fix can be developed at
-    # that time.
-    default_label_text = field.name.replace('_', ' ').title()
-    if field.label.text != default_label_text:
-        rv['metavar'] = field.label.text
-
-    rv.update(extra_kwargs)
-    return rv
-
-
-@mapper(BooleanField)
-def get_boolean_kwargs(field):
-    if field.default:
-        action = 'store_false'
-    else:
-        action = 'store_true'
-    kwargs = basic_kwargs(field, action=action)
-    if 'metavar' in kwargs:
-        del kwargs['metavar']
-    return kwargs
-
-
-@mapper(DecimalField)
-def get_decimal_kwargs(field):
-    return basic_kwargs(field, type=decimal_type)
-
-
-@mapper(IntegerField)
-def get_integer_kwargs(field):
-    return basic_kwargs(field, type=int)
-
-
-@mapper(FloatField)
-def get_float_kwargs(field):
-    return basic_kwargs(field, type=float)
-
-
-@mapper(StringField)
-def get_string_kwargs(field):
-    return basic_kwargs(field)
-
-
 class Form(BaseForm):
-    def __init__(self, obj=None, meta=None, **kwargs):
-        self._clik = AttributeDict(
-            arguments={},
-            kwargs=kwargs,
-            meta=meta,
-            obj=obj,
-            rv=None,
-        )
+    short_arguments = None
 
-    def configure_argument(self, field_name, *args, **kwargs):
-        self._clik.arguments[field_name] = (args, kwargs)
+    @staticmethod
+    def get_short_arguments():
+        pass
+
+    def __init__(self, obj=None, meta=None, args=None, **kwargs):
+        self._clik_constructor_kwargs = dict(obj=obj, meta=meta, kwargs=kwargs)
+        if args is not None:
+            self.bind_args(args)
+        else:
+            super(Form, self).__init__(obj=obj, meta=meta, **kwargs)
 
     def configure_parser(self, parser=None):
         if parser is None:
             parser = clik_parser
 
-        # We are not yet initialized (since we don't yet have the args
-        # data). Create a dummy instance of this form in order to
-        # iterate over the fields.
-        dummy_form = self.__class__()
-        BaseForm.__init__(dummy_form)
+        short_args = {}
+        for value in (self.short_arguments, self.get_short_arguments()):
+            if value is not None:
+                short_args.update(value)
+        short_args = dict((value, key) for key, value in iteritems(short_args))
 
-        for field in dummy_form:
-            method_name = 'configure_%s_argument' % field.name
-            if field.name in self._clik.arguments:
-                args, kwargs = self._clik.arguments[field.name]
-                parser.add_argument(*args, **kwargs)
-            elif hasattr(self, method_name):
-                getattr(self, method_name)(parser)
+        for field in self:
+            field_type = type(field)
+            if field_type in mappers:
+                kwargs = mappers[field_type](self, field)
             else:
-                field_type = type(field)
-                if field_type in mappers:
-                    kwargs = mappers[field_type](field)
-                    parser.add_argument('--%s' % field.name, **kwargs)
-                else:
-                    raise UnsupportedFieldType(field_type, self, field)
+                raise UnsupportedFieldType(field_type, self, field)
 
-    def validate(self, args=None):
-        if self._clik.rv is None:
-            if args is None:
-                args = clik_args
-            super(Form, self).__init__(
-                obj=self._clik.obj,
-                meta=self._clik.meta,
-                data=args.__dict__,
-                **self._clik.kwargs
-            )
-            self._clik.rv = super(Form, self).validate()
-        return self._clik.rv
+            args = ()
+            if field.name in short_args:
+                args += ('-%s' % short_args[field.name],)
+            args +=  ('--%s' % field.name,)
+
+            parser.add_argument(*args, **kwargs)
+
+    def bind_args(self, args=None):
+        if args is None:
+            args = clik_args
+        kwargs = self._clik_constructor_kwargs.copy()
+        kwargs.update(dict(data=args))
+        super(Form, self).__init__(**kwargs)
+
+    def bind_and_validate(self, args=None):
+        self.bind_args(args)
+        return self.validate()
