@@ -16,6 +16,7 @@ version = '0.90.0'
 
 requires = (
     'clik',
+    'wtforms',
 )
 
 url = 'https://%s.readthedocs.io' % name

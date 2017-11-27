@@ -6,6 +6,8 @@ Clik extension that integrates with WTForms.
 :copyright: Copyright (c) Joe Joyce and contributors, 2017.
 :license: BSD
 """
+from __future__ import print_function
+
 import datetime
 import functools
 import sys
@@ -13,10 +15,16 @@ import sys
 from clik import args as clik_args, parser as clik_parser
 from clik.compat import iteritems
 from clik.util import AttributeDict
-from wtforms import BooleanField, DateField as DateFieldBase, \
-    DateTimeField as DateTimeFieldBase, DecimalField as DecimalFieldBase, \
-    FieldList as FieldListBase, FloatField as FloatFieldBase, \
-    Form as FormBase, FormField, IntegerField as IntegerFieldBase, \
+from wtforms import \
+    BooleanField, \
+    DateField as DateFieldBase, \
+    DateTimeField as DateTimeFieldBase, \
+    DecimalField as DecimalFieldBase, \
+    FieldList as FieldListBase, \
+    FloatField as FloatFieldBase, \
+    Form as FormBase, \
+    FormField, \
+    IntegerField as IntegerFieldBase, \
     SelectField as SelectFieldBase, \
     SelectMultipleField as SelectMultipleFieldBase, \
     StringField as StringFieldBase
