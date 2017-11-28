@@ -31,25 +31,9 @@ from wtforms import \
 from wtforms.validators import Optional, Required
 
 
-COMMON_DEFAULT_CALLABLES = {
-    datetime.date.today: 'today',
-    datetime.datetime.today: 'now',
-    datetime.time: 'now',
-}
-EXAMPLE_DATETIME = datetime.datetime(2017, 11, 27, 13, 52, 41)
-
-
-def default(fn, parser_help_value):
-    @functools.wraps(fn)
-    def wrapper():
-        return fn()
-    wrapper.__clik_wtf__ = parser_help_value
-    return wrapper
-
-
-class FormError(Exception):
-    """Error type for exceptions raised from this module."""
-
+# =============================================================================
+# ----- Fields ----------------------------------------------------------------
+# =============================================================================
 
 class DateField(DateFieldBase):
     def __init__(self, metavar=None, **kwargs):
@@ -97,10 +81,19 @@ class SelectField(SelectFieldBase):
             if isinstance(validator, Required):
                 break
         else:
-            validators.append(Optional())
+            if not any(isinstance(v, Optional) for v in validators):
+                validators.append(Optional())
         super_init = super(SelectField, self).__init__
         super_init(choices=choices, validators=validators, **kwargs)
         self.metavar = metavar
+
+    def process_data(self, value):
+        self.data = None
+        if value is not None:
+            try:
+                self.data = self.coerce(value)
+            except (ValueError, TypeError):
+                pass
 
 
 class SelectMultipleField(SelectField, SelectMultipleFieldBase):
@@ -111,6 +104,42 @@ class StringField(StringFieldBase):
     def __init__(self, metavar=None, **kwargs):
         super(StringField, self).__init__(**kwargs)
         self.metavar = metavar
+
+    def process_formdata(self, valuelist):
+        if valuelist:
+            self.data = valuelist[0]
+
+
+# =============================================================================
+# ----- Miscellany ------------------------------------------------------------
+# =============================================================================
+
+COMMON_DEFAULT_CALLABLES = {
+    datetime.date.today: 'today',
+    datetime.datetime.today: 'now',
+    datetime.time: 'now',
+}
+EXAMPLE_DATETIME = datetime.datetime(2017, 11, 27, 13, 52, 41)
+
+DATETIME_TYPES = (DateField, DateFieldBase, DateTimeField, DateTimeFieldBase)
+PRIMITIVE_TYPES = (DecimalField, DecimalFieldBase, FloatField, FloatFieldBase,
+                   IntegerField, IntegerFieldBase, StringField,
+                   StringFieldBase)
+SELECT_TYPES = (SelectField, SelectFieldBase, SelectMultipleField,
+                SelectMultipleFieldBase)
+SIMPLE_TYPES = DATETIME_TYPES + PRIMITIVE_TYPES + SELECT_TYPES
+
+
+def default(fn, parser_help_value):
+    @functools.wraps(fn)
+    def wrapper():
+        return fn()
+    wrapper.__clik_wtf__ = parser_help_value
+    return wrapper
+
+
+class FormError(Exception):
+    """Error type for exceptions raised from this module."""
 
 
 class Multidict(dict):
@@ -127,16 +156,11 @@ class Multidict(dict):
         return value
 
 
-class Form(FormBase):
-    DATETIME_TYPES = (DateField, DateFieldBase, DateTimeField,
-                      DateTimeFieldBase)
-    PRIMITIVE_TYPES = (DecimalField, DecimalFieldBase, FloatField,
-                       FloatFieldBase, IntegerField, IntegerFieldBase,
-                       StringField, StringFieldBase)
-    SELECT_TYPES = (SelectField, SelectFieldBase, SelectMultipleField,
-                    SelectMultipleFieldBase)
-    SIMPLE_TYPES = DATETIME_TYPES + PRIMITIVE_TYPES + SELECT_TYPES
+# =============================================================================
+# ----- Form ------------------------------------------------------------------
+# =============================================================================
 
+class Form(FormBase):
     short_arguments = None
 
     @staticmethod
@@ -221,20 +245,21 @@ class Form(FormBase):
                     elif ctor_data and field.name in ctor_data:
                         default = ctor_data[field.name]
 
-                    if isinstance(field, self.SIMPLE_TYPES):
+                    if isinstance(field, SIMPLE_TYPES):
                         if getattr(field, 'metavar', None) is not None:
                             kwargs['metavar'] = field.metavar
                         handle_default = True
-                        if isinstance(field, self.DATETIME_TYPES):
+                        if isinstance(field, DATETIME_TYPES):
                             note_dt = EXAMPLE_DATETIME.strftime(field.format)
-                            note_fmt = 'format: "%s", example: "%s"'
-                            note = note_fmt % (field.format, note_dt)
+                            note_fmt = 'format: %s, example: %s'
+                            note_args = (field.format, note_dt)
+                            note = note_fmt % tuple(map(quote, note_args))
                             add_to_help(note.replace('%', '%%'))
                             if default and not callable(default):
                                 handle_default = False
                                 string = default.strftime(field.format)
-                                add_to_help('default: "%s"' % string)
-                        if isinstance(field, self.SELECT_TYPES):
+                                add_to_help('default: %s' % quote(string))
+                        if isinstance(field, SELECT_TYPES):
                             choices = [value for value, _ in field.choices]
                             quoted = [quote(choice) for choice in choices]
                             add_to_help('choices: %s' % ', '.join(quoted))
@@ -265,7 +290,7 @@ class Form(FormBase):
                             if val is not None:
                                 add_to_help('default: %s' % quote(val))
                     # I am not happy with this implementation, and I'm
-                    # not sure how to properly handle boolean fields.
+                    # not sure how to fix it.
                     # elif isinstance(field, BooleanField):
                     #     val = bool(default() if callable(default) else default)
                     #     kwargs['default'] = val
