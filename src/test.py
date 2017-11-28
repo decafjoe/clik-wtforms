@@ -8,15 +8,17 @@ Tests for :mod:`clik_wtforms`.
 """
 import datetime
 import decimal
+import io
 
 import pytest
 from clik.argparse import ArgumentParser
 from clik.util import AttributeDict
+from wtforms import SubmitField
 from wtforms.validators import Optional, Required
 
 from clik_wtforms import default, DateField, DateTimeField, DecimalField, \
-    FieldList, FloatField, Form, FormField, Multidict, IntegerField, \
-    SelectField, SelectMultipleField, StringField
+    FieldList, FloatField, Form, FormError, FormField, Multidict, \
+    IntegerField, SelectField, SelectMultipleField, StringField
 
 
 # TODO(jjoyce): test defaults by passing different kwargs to ctor and
@@ -24,11 +26,16 @@ from clik_wtforms import default, DateField, DateTimeField, DecimalField, \
 #               proper?)
 
 
+# TODO(jjoyce): what happens if we combine fieldlist and
+#               select[multiple]field? 
+
+
 class Argument(object):
     def __init__(self, name):
         self.help = ''
         self.metavar = None
         self.name = name
+        self.short_name = None
 
     def assert_choices(self, choices):
         self.assert_in_help('choices: %s' % choices)
@@ -51,31 +58,38 @@ class Argument(object):
     def assert_multiple(self):
         self.assert_in_help('may be supplied multiple times')
 
+    def assert_short_name(self, short_name):
+        assert short_name == self.short_name
+
 
 class Harness(AttributeDict):
-    def __init__(self, form_class):
+    def __init__(self, form_class, **kwargs):
         self.form_class = form_class
         self.parser = ArgumentParser()
-        self.form_class().configure_parser(self.parser)
+        self.form_class(**kwargs).configure_parser(self.parser)
 
         current_arg = None
         for line in self.parser.format_help().splitlines():
             line = line.strip()
             if line.startswith('-'):
                 bits = line.split('  ', 1)
-                long_arg_bits = bits[0].split(',')[-1].strip().split()
-                current_arg = long_arg_bits[0][2:]
-                self[current_arg] = Argument(current_arg)
+                arg_bits = bits[0].split(',')
+                long_arg_bits = arg_bits[-1].strip().split()
+                name = long_arg_bits[0][2:]
+                current_arg = Argument(name)
+                self[name] = current_arg
+                if len(arg_bits) > 1:
+                    current_arg.short_name = arg_bits[0].strip().split()[0][1:]
                 if len(long_arg_bits) > 1:
-                    self[current_arg].metavar = long_arg_bits[1]
+                    current_arg.metavar = long_arg_bits[1]
                 if len(bits) > 1:
-                    self[current_arg].help += bits[1].strip()
+                    current_arg.help += bits[1].strip()
             elif current_arg:
-                self[current_arg].help += ' %s' % line
+                current_arg.help += ' %s' % line
 
-    def result_for(self, *argv):
-        form = self.form_class()
-        form.bind_and_validate(self.parser.parse_args(argv))
+    def result_for(self, *argv, **kwargs):
+        form = self.form_class(**kwargs)
+        assert form.bind_and_validate(self.parser.parse_args(argv))
         return form.data
 
 
@@ -209,10 +223,12 @@ def test_field_basics(field_type, default, default_str, value, value_str):
 
     def assert_arg(name, default, text, metavar):
         assert name in harness
-        harness[name].assert_in_help(text)
-        harness[name].assert_metavar(metavar)
+        arg = harness[name]
+        arg.assert_in_help(text)
+        arg.assert_metavar(metavar)
+        arg.assert_short_name(None)
         if default is not None:
-            harness[name].assert_default(default)
+            arg.assert_default(default)
 
     assert_arg('all', default_str, 'a helping message', 'FOO')
     assert_arg('bare', None, '', 'BARE')
@@ -435,3 +451,143 @@ def test_form_field():
             c_c_c=dict(value='zc'),
         ),
     )
+
+
+def test_defaults():
+    class MyForm(Form):
+        value = StringField()
+
+    class Object(object):
+        value = 'foo'
+
+    obj = Object()
+    kwargs = dict(value='bar')
+    data = dict(value='baz')
+
+    def assert_default(default, **kwargs):
+        harness = Harness(MyForm, **kwargs)
+        assert 'value' in harness
+        harness.value.assert_default(default)
+
+    assert_default('foo', obj=obj)
+    # assert_default('bar', **kwargs)
+    assert_default('baz', data=data)
+
+    # assert_default('foo', obj=obj, **kwargs)
+    assert_default('foo', obj=obj, data=data)
+    # assert_default('bar', data=data, **kwargs)
+
+    # assert_default('foo', obj=obj, data=data, **kwargs)
+
+    harness = Harness(MyForm)
+    assert harness.result_for() == dict(value=None)
+    assert harness.result_for(obj=obj) == dict(value='foo')
+    # assert harness.result_for(**kwargs) == dict(value='bar')
+    assert harness.result_for(data=data) == dict(value='baz')
+
+
+def test_callable_default():
+    class MyForm(Form):
+        common = DateTimeField(default=datetime.datetime.today)
+        specified = StringField(default=default(lambda: 'bar', 'always bar'))
+        unknown = StringField(default=lambda: 'foo')
+
+    harness = Harness(MyForm)
+
+    assert 'common' in harness
+    harness.common.assert_default('now')
+
+    assert 'specified' in harness
+    harness.specified.assert_default('always bar')
+
+    assert 'unknown' in harness
+    harness.unknown.assert_default('dynamic')
+
+
+def test_short_arguments():
+    class MyForm(Form):
+        short_arguments = dict(a='alpha', b='bravo')
+
+        @staticmethod
+        def get_short_arguments():
+            return dict(c='charlie', d='delta')
+
+        alpha = StringField()
+        bravo = StringField()
+        charlie = StringField()
+        delta = StringField()
+
+    harness = Harness(MyForm)
+    for name in ('alpha', 'bravo', 'charlie', 'delta'):
+        assert name in harness
+        harness[name].assert_short_name(name[0])
+
+    expected = dict(alpha=None, bravo=None, charlie=None, delta=None)
+    assert harness.result_for() == expected
+
+    args = ('-aecho', '-bgolf', '-ckilo', '-dlima')
+    expected = dict(alpha='echo', bravo='golf', charlie='kilo', delta='lima')
+    assert harness.result_for(*args) == expected
+
+
+def test_short_argument_form_field():
+    class ChildForm(Form):
+        value = StringField()
+
+    class ParentForm(Form):
+        short_arguments = dict(c='child')
+        child = FormField(ChildForm)
+
+    with pytest.raises(FormError) as ei:
+        Harness(ParentForm)
+    e = ei.value
+    assert 'cannot assign a short argument to a FormField' in str(e)
+
+
+def test_single_character_field_name():
+    class MyForm(Form):
+        a = StringField()
+
+    with pytest.raises(FormError) as ei:
+        Harness(MyForm)
+    e = ei.value
+    assert 'field names must be at least two characters' in str(e)
+
+
+def test_unsupported_field_type():
+    class MyForm(Form):
+        submit = SubmitField()
+
+    with pytest.raises(FormError) as ei:
+        Harness(MyForm)
+    e = ei.value
+    assert 'unsupported field type' in str(e)
+    assert 'wtforms.fields.simple.SubmitField' in str(e)
+
+
+def test_print_errors():
+    class ChildForm(Form):
+        value = SelectField(choices=())
+
+    class ParentForm(Form):
+        child = FormField(ChildForm)
+        multiple = SelectMultipleField(choices=())
+        number = IntegerField()
+
+    parser = ArgumentParser()
+    form = ParentForm()
+    form.configure_parser(parser)
+    args = parser.parse_args((
+        '--child-value', 'foo',
+        '--multiple', 'bar',
+        '--number', 'baz',
+    ))
+    assert not form.bind_and_validate(args)
+    string_io = io.StringIO()
+    form.print_errors(string_io)
+    expected_lines = (
+        'child-value: foo: not a valid choice',
+        "multiple: 'bar' is not a valid choice for this field",
+        'number: baz: not a valid integer value',
+    )
+    assert string_io.getvalue() == '%s\n' % '\n'.join(expected_lines)

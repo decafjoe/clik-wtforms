@@ -122,6 +122,8 @@ COMMON_DEFAULT_CALLABLES = {
 EXAMPLE_DATETIME = datetime.datetime(2017, 11, 27, 13, 52, 41)
 
 DATETIME_TYPES = (DateField, DateFieldBase, DateTimeField, DateTimeFieldBase)
+MULTIPLE_VALUE_TYPES = (FieldList, FieldListBase, SelectMultipleField,
+                        SelectMultipleFieldBase)
 PRIMITIVE_TYPES = (DecimalField, DecimalFieldBase, FloatField, FloatFieldBase,
                    IntegerField, IntegerFieldBase, StringField,
                    StringFieldBase)
@@ -178,11 +180,14 @@ class Form(FormBase):
             prefix=prefix,
         )
         super(Form, self).__init__(**self._clik_constructor_kwargs)
+        self._args = None
 
     def _configure_parser(self, parser, root=False):
         def quote(value):
             """Convenience fn that does not deserve its own top-level slot."""
-            return ('"%s"' if len(value.split()) > 1 else '%s') % value
+            if len(value.split()) > 1:
+                return '"%s"' % value
+            return str(value)
 
         # Only the top-level form can have short arguments. Any
         # subforms (by way of FormFields) will ignore short arguments.
@@ -215,7 +220,9 @@ class Form(FormBase):
                 # Do a bunch of order-sensitive computation and
                 # manipulation of args and kwargs, then ultimately
                 # call parser.add_argument(*args, **kwargs).
-                args = ('-%s' % short_arg,) if short_arg is not None else ()
+                args = ()
+                if short_arg is not None:
+                    args += ('-%s' % short_arg,)
                 args += ('--%s' % field.name.replace('_', '-'),)
                 kwargs = dict(help=field.description)
 
@@ -240,8 +247,10 @@ class Form(FormBase):
                     default = field.default
                     if ctor_obj and hasattr(ctor_obj, field.name):
                         default = getattr(ctor_obj, field.name)
-                    elif field.name in ctor_kwargs:
-                        default = ctor_kwargs[field.name]
+                    # Overriding with plain ctor kwargs doesn't seem
+                    # to work.
+                    # elif field.name in ctor_kwargs:
+                    #     default = ctor_kwargs[field.name]
                     elif ctor_data and field.name in ctor_data:
                         default = ctor_data[field.name]
 
@@ -286,13 +295,15 @@ class Form(FormBase):
                                 elif default in COMMON_DEFAULT_CALLABLES:
                                     val = COMMON_DEFAULT_CALLABLES[default]
                             elif default is not None:
-                                val = str(default)
+                                val = quote(str(default))
                             if val is not None:
-                                add_to_help('default: %s' % quote(val))
+                                add_to_help('default: %s' % val)
                     # I am not happy with this implementation, and I'm
                     # not sure how to fix it.
                     # elif isinstance(field, BooleanField):
-                    #     val = bool(default() if callable(default) else default)
+                    #     val = default
+                    #     if callable(default):
+                    #         val = default()
                     #     kwargs['default'] = val
                     #     if val:
                     #         kwargs['action'] = 'store_false'
@@ -305,7 +316,7 @@ class Form(FormBase):
                 parser.add_argument(*args, **kwargs)
 
     def configure_parser(self, parser=None):
-        if parser is None:
+        if parser is None:  # pragma: no cover (obviously correct)
             parser = clik_parser
         self._configure_parser(parser, root=True)
 
@@ -326,20 +337,21 @@ class Form(FormBase):
                     else:
                         formdata[key] = value
 
-    def _bind_formdata(self, formdata):
+    def _bind_formdata(self, formdata, args):
+        self._args = args
         kwargs = self._clik_constructor_kwargs.copy()
         kwargs.update(dict(formdata=formdata))
         super(Form, self).__init__(**kwargs)
         for field in self:
             if isinstance(field, FormField):
-                field.form._bind_formdata(formdata)
+                field.form._bind_formdata(formdata, args)
 
     def bind_args(self, args=None):
-        if args is None:
+        if args is None:  # pragma: no cover (obviously correct)
             args = clik_args
         formdata = Multidict({'_': object()})
         self._populate_formdata(formdata, args)
-        self._bind_formdata(formdata)
+        self._bind_formdata(formdata, args)
 
     def bind_and_validate(self, args=None):
         self.bind_args(args)
@@ -351,5 +363,10 @@ class Form(FormBase):
                 field.form.print_errors(file)
             else:
                 for error in field.errors:
-                    msg = '%s: %s' % (field.name.replace('_', '-'), error)
-                    print(msg, file=sys.stderr)
+                    error = error[0].lower() + error[1:]
+                    msg = '%s: ' % field.name.replace('_', '-')
+                    if not isinstance(field, MULTIPLE_VALUE_TYPES):
+                        name = field.name.replace('-', '_')
+                        msg += '%s: ' % getattr(self._args, name)
+                    msg += error
+                    print(msg, file=file)
