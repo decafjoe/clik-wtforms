@@ -14,56 +14,80 @@ import pytest
 from clik.argparse import ArgumentParser
 from clik.util import AttributeDict
 from wtforms import SubmitField
-from wtforms.validators import Optional, Required
+from wtforms.validators import InputRequired, Optional
 
-from clik_wtforms import default, DateField, DateTimeField, DecimalField, \
-    FieldList, FloatField, Form, FormError, FormField, Multidict, \
-    IntegerField, SelectField, SelectMultipleField, StringField
-
-
-# TODO(jjoyce): test defaults by passing different kwargs to ctor and
-#               seeing what data it spits out (compare to wtforms
-#               proper?)
-
-
-# TODO(jjoyce): what happens if we combine fieldlist and
-#               select[multiple]field? 
+from clik_wtforms import DateField, DateTimeField, DecimalField, default, \
+    FieldList, FloatField, Form, FormError, FormField, IntegerField, \
+    Multidict, SelectField, SelectMultipleField, StringField
 
 
 class Argument(object):
+    """Represents argument data, as parsed from a ``--help`` message."""
+
     def __init__(self, name):
+        """
+        Instantiate the object.
+
+        :param str name: Name of the argument
+        """
         self.help = ''
         self.metavar = None
         self.name = name
         self.short_name = None
 
     def assert_choices(self, choices):
+        """Assert choices string is in help message."""
         self.assert_in_help('choices: %s' % choices)
 
     def assert_datetime_example(self, example):
+        """Assert datetime example is in help message."""
         self.assert_in_help('example: %s' % example)
 
     def assert_datetime_format(self, format):
+        """Assert datetime format instructions are in help message."""
         self.assert_in_help('format: %s' % format)
 
     def assert_default(self, value):
+        """Assert default value is in help message."""
         self.assert_in_help('default: %s' % value)
 
     def assert_in_help(self, text):
+        """Assert ``text`` is in help message."""
         assert text in self.help
 
     def assert_metavar(self, metavar):
+        """Assert metavar for this argument is ``metavar``."""
         assert metavar == self.metavar
 
     def assert_multiple(self):
+        """Assert help message says argument can be supplied multiple times."""
         self.assert_in_help('may be supplied multiple times')
 
     def assert_short_name(self, short_name):
+        """Assert short name for this argument."""
         assert short_name == self.short_name
 
 
 class Harness(AttributeDict):
+    """
+    Test harness for clik-wtforms.
+
+    This "runs" the program with ``--help`` to get the configured arguments,
+    which are made available as the keys on the harness object. See
+    :class:`Argument` for how these are used.
+
+    This can also simulate user input and the resulting form data via the
+    :meth:`result_for`.
+    """
+
     def __init__(self, form_class, **kwargs):
+        """
+        Instantiate the harness.
+
+        :param type form_class: Form class under test
+        :param kwargs: Keyword arguments to pass to the form class constructor
+                       when gathering the arguments from the help message
+        """
         self.form_class = form_class
         self.parser = ArgumentParser()
         self.form_class(**kwargs).configure_parser(self.parser)
@@ -88,6 +112,15 @@ class Harness(AttributeDict):
                 current_arg.help += ' %s' % line
 
     def result_for(self, *argv, **kwargs):
+        """
+        Return form result from "calling the program" with given ``argv``.
+
+        :param argv: Arguments to pass to the parser
+        :type argv: Sequence
+        :param kwargs: Keyword arguments to pass to the form class constructor
+        :return: :attr:`wtforms.form.Form.data` after binding and validation
+        :rtype: :class:`dict`
+        """
         form = self.form_class(**kwargs)
         assert form.bind_and_validate(self.parser.parse_args(argv))
         return form.data
@@ -118,6 +151,7 @@ def test_metavar_kwarg():
         SelectMultipleField,
         StringField,
     )
+
     class MyForm(Form):
         pass
     for field_type in test_types:
@@ -135,9 +169,11 @@ def test_select_choices():
     """Check that choices for select fields get mapped correctly."""
     choices_in = ('foo', 'bar', 'baz')
     choices_out = [('foo', 'foo'), ('bar', 'bar'), ('baz', 'baz')]
+
     class MyForm(Form):
         select = SelectField(choices=choices_in)
         selectm = SelectMultipleField(choices=choices_in)
+
     form = MyForm()
     assert form.select.choices == choices_out
     assert form.selectm.choices == choices_out
@@ -148,19 +184,19 @@ def test_select_required():
     class MyForm(Form):
         s_exp = SelectField(validators=[Optional()])
         s_opt = SelectField()
-        s_req = SelectField(validators=[Required()])
+        s_req = SelectField(validators=[InputRequired()])
         sm_exp = SelectMultipleField(validators=[Optional()])
         sm_opt = SelectMultipleField()
-        sm_req = SelectMultipleField(validators=[Required()])
+        sm_req = SelectMultipleField(validators=[InputRequired()])
     form = MyForm()
 
     def assert_optional(field):
         assert any(isinstance(v, Optional) for v in field.validators)
-        assert not any(isinstance(v, Required) for v in field.validators)
+        assert not any(isinstance(v, InputRequired) for v in field.validators)
 
     def assert_required(field):
         assert not any(isinstance(v, Optional) for v in field.validators)
-        assert any(isinstance(v, Required) for v in field.validators)
+        assert any(isinstance(v, InputRequired) for v in field.validators)
 
     assert_optional(form.s_exp)
     assert_optional(form.s_opt)
@@ -208,6 +244,7 @@ def test_multidict():
     (StringField, 'foo', 'foo', 'bar', 'bar'),
 ])
 def test_field_basics(field_type, default, default_str, value, value_str):
+    """Check basics for fields: defaults, descriptions, metavars."""
     class MyForm(Form):
         all = field_type(
             default=default,
@@ -275,10 +312,11 @@ def test_field_basics(field_type, default, default_str, value, value_str):
             '2018-07-22 18:16:14',
             '20180722181614',
         ),
-])
+    ])
 def test_datetime_fields(field_type, default_format, default_example,
                          custom_format, custom_example, value, default_string,
                          custom_string):
+    """Check format handling for date/time based fields."""
     class MyForm(Form):
         custom = field_type(format=custom_format)
         default = field_type()
@@ -298,6 +336,7 @@ def test_datetime_fields(field_type, default_format, default_example,
 
 
 def test_select_fields():
+    """Check configuration and data handling for select fields."""
     choices = ('foo', 'bar', 'baz qux')
     choices_str = 'foo, bar, "baz qux"'
 
@@ -332,7 +371,7 @@ def test_select_fields():
     assert 'default' in result
     assert result['default'] == 'foo'
     assert 'invalid' in result
-    assert result['invalid'] == None
+    assert result['invalid'] is None
     assert 'multiple' in result
     assert isinstance(result['multiple'], list)
     assert set(result['multiple']) == set(('foo', 'bar'))
@@ -364,6 +403,7 @@ def test_select_fields():
     (StringField, ('foo', 'bar'), ('foo', 'bar')),
 ])
 def test_field_list(field_type, value_strs, values):
+    """Check behavior of field lists."""
     class MyForm(Form):
         value = FieldList(field_type())
 
@@ -381,6 +421,13 @@ def test_field_list(field_type, value_strs, values):
 
 
 def test_form_field():
+    """
+    Very ugly test for form fields.
+
+    This test tries to be as "mean" as possible, with multiply-nested forms
+    and lots of underscores. The idea is to stress the form data translation
+    bits of the code.
+    """
     class GrandchildForm(Form):
         value = StringField()
 
@@ -454,6 +501,7 @@ def test_form_field():
 
 
 def test_defaults():
+    """Check that defaults handling and precedence works as expected."""
     class MyForm(Form):
         value = StringField()
 
@@ -461,7 +509,7 @@ def test_defaults():
         value = 'foo'
 
     obj = Object()
-    kwargs = dict(value='bar')
+    # kwargs = dict(value='bar')
     data = dict(value='baz')
 
     def assert_default(default, **kwargs):
@@ -487,6 +535,7 @@ def test_defaults():
 
 
 def test_callable_default():
+    """Check default value help output for callable defaults."""
     class MyForm(Form):
         common = DateTimeField(default=datetime.datetime.today)
         specified = StringField(default=default(lambda: 'bar', 'always bar'))
@@ -505,8 +554,9 @@ def test_callable_default():
 
 
 def test_short_arguments():
+    """Check that short arguments are merged and assigned correctly."""
     class MyForm(Form):
-        short_arguments = dict(a='alpha', b='bravo')
+        short_arguments = dict(a='alpha', b='bravo', c='echo')
 
         @staticmethod
         def get_short_arguments():
@@ -531,6 +581,7 @@ def test_short_arguments():
 
 
 def test_short_argument_form_field():
+    """Check that short arguments cannot be assigned to a ``FormField``."""
     class ChildForm(Form):
         value = StringField()
 
@@ -545,6 +596,7 @@ def test_short_argument_form_field():
 
 
 def test_single_character_field_name():
+    """Check that single-character field names are disallowed."""
     class MyForm(Form):
         a = StringField()
 
@@ -555,6 +607,7 @@ def test_single_character_field_name():
 
 
 def test_unsupported_field_type():
+    """Check that using an unsupported field type raises an exception."""
     class MyForm(Form):
         submit = SubmitField()
 
@@ -566,6 +619,7 @@ def test_unsupported_field_type():
 
 
 def test_print_errors():
+    """Check the output of :meth:`clik_wtforms.Form.print_errors`."""
     class ChildForm(Form):
         value = SelectField(choices=())
 
