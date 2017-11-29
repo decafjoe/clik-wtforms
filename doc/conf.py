@@ -24,7 +24,7 @@ project = u'clik-wtforms'
 copyright = u'2017, Joe Joyce and contributors'
 author = u'Joe Joyce and contributors'
 version = u'0.90'
-release = u'0.90.0'
+release = u'0.90.1'
 
 # Paths
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']

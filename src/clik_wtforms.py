@@ -33,7 +33,7 @@ from wtforms.validators import InputRequired, Optional
 #: Version of the library.
 #:
 #: :type: :class:`str`
-__version__ = '0.90.0'
+__version__ = '0.90.1'
 
 
 # =============================================================================

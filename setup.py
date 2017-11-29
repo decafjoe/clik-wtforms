@@ -12,7 +12,7 @@ from setuptools import find_packages, setup
 
 
 name = 'clik-wtforms'
-version = '0.90.0'
+version = '0.90.1'
 
 requires = (
     'clik',
