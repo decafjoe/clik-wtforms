@@ -69,6 +69,8 @@ Fields
 Miscellany
 ==========
 
+.. autodata:: __version__
+
 .. autofunction:: default
 
 .. autofunction:: stringify
