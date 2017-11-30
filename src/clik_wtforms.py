@@ -526,12 +526,14 @@ class Form(FormBase):
         super(Form, self).__init__(prefix=prefix)
         self._args = None
 
-    def _configure_parser(self, parser, root=False):
+    def _configure_parser(self, parser, exclude, root=False):
         """
         Super-spaghetti method that does the heavy lifting for parser config.
 
         :param parser: Parser we are currently configuring
         :type parser: :class:`clik.argparse.ArgumentParser`
+        :param exclude: Sequence of field names which should not be configured
+        :type exclude: Sequence or ``None``
         :param bool root: Whether this form instance is the root form (if
                           ``False``, this form is being configured because
                           it is a ``FormField`` of a parent form)
@@ -552,6 +554,9 @@ class Form(FormBase):
                 fmt = 'field names must be at least two characters (got: "%s")'
                 raise FormError(fmt % field.name)
 
+            if field.name in exclude:
+                continue
+
             short_arg = short_args.get(field.name, None)
 
             if isinstance(field, FormField):
@@ -562,7 +567,7 @@ class Form(FormBase):
                     raise FormError(msg)
 
                 # Recursively configure subforms.
-                field.form._configure_parser(parser)
+                field.form._configure_parser(parser, exclude)
             else:
                 # Do a bunch of order-sensitive computation and
                 # manipulation of args and kwargs, then ultimately
@@ -662,17 +667,22 @@ class Form(FormBase):
 
                 parser.add_argument(*args, **kwargs)
 
-    def configure_parser(self, parser=None):
+    def configure_parser(self, parser=None, exclude=None):
         """
         Add arguments to ``parser`` for this form's fields.
 
         :param parser: Optional parser to configure, defaults to
                        :data:`clik.app.parser`
         :type parser: :class:`clik.argparse.ArgumentParser`
+        :param exclude: Sequence of field names which will not be configured
+                        on the parser
+        :type exclude: Sequence or ``None``
         """
         if parser is None:  # pragma: no cover (obviously correct)
             parser = clik_parser
-        self._configure_parser(parser, root=True)
+        if exclude is None:  # pragma: no cover (obviously correct)
+            exclude = ()
+        self._configure_parser(parser, exclude=exclude, root=True)
 
     def _populate_formdata(self, formdata, args, hyphens=()):
         """
