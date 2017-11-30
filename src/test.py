@@ -90,7 +90,11 @@ class Harness(AttributeDict):
         """
         self.form_class = form_class
         self.parser = ArgumentParser()
-        self.form_class(**kwargs).configure_parser(self.parser)
+        cpkwargs = {}
+        if 'configure_parser_kwargs' in kwargs:
+            cpkwargs = kwargs['configure_parser_kwargs']
+            del kwargs['configure_parser_kwargs']
+        self.form_class(**kwargs).configure_parser(self.parser, **cpkwargs)
 
         current_arg = None
         for line in self.parser.format_help().splitlines():
@@ -498,6 +502,15 @@ def test_form_field():
             c_c_c=dict(value='zc'),
         ),
     )
+
+
+def test_exclude_fields():
+    """Check that excluded fields are not configured in the parser."""
+    class MyForm(Form):
+        value = StringField()
+
+    harness = Harness(MyForm, configure_parser_kwargs=dict(exclude=['value']))
+    assert 'value' not in harness
 
 
 def test_defaults():
