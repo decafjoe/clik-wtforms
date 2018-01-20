@@ -3,7 +3,7 @@
 Clik extension that integrates with WTForms.
 
 :author: Joe Joyce <joe@decafjoe.com>
-:copyright: Copyright (c) Joe Joyce and contributors, 2017.
+:copyright: Copyright (c) Joe Joyce and contributors, 2017-2018.
 :license: BSD
 """
 from __future__ import print_function
