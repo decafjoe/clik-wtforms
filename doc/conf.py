@@ -3,7 +3,7 @@
 Sphinx configuration file for clik-wtforms.
 
 :author: Joe Joyce <joe@decafjoe.com>
-:copyright: Copyright (c) Joe Joyce and contributors, 2017.
+:copyright: Copyright (c) Joe Joyce and contributors, 2017-2018.
 :license: BSD
 """
 import os
@@ -21,7 +21,7 @@ sys.path.insert(0, src_path)
 
 # Basic project information
 project = u'clik-wtforms'
-copyright = u'2017, Joe Joyce and contributors'
+copyright = u'2017-2018, Joe Joyce and contributors'
 author = u'Joe Joyce and contributors'
 version = u'0.90'
 release = u'0.90.2'

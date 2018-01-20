@@ -1,7 +1,7 @@
 #
 # Makefile for the clik-wtforms project.
 #
-# Copyright Joe Joyce and contributors, 2017.
+# Copyright Joe Joyce and contributors, 2017-2018.
 # See LICENSE for licensing information.
 #
 
