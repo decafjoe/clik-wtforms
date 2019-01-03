@@ -3,7 +3,7 @@
 Tests for :mod:`clik_wtforms`.
 
 :author: Joe Joyce <joe@decafjoe.com>
-:copyright: Copyright (c) Joe Joyce and contributors, 2017-2018.
+:copyright: Copyright (c) Joe Joyce and contributors, 2017-2019.
 :license: BSD
 """
 import datetime
